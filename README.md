@@ -14,6 +14,9 @@ nothing in it polls.
 - **Never steals focus.** It is a non-activating panel: it takes your keystrokes without making
   Lapp the frontmost app, so the thing you were working in stays where it was. Escape hands
   focus straight back.
+- **A tab per note.** Several notes open at once, switched from the bar across the top or
+  with the keyboard. Closing a tab files what was on it, so nothing is thrown away by
+  accident — ✕ is still there for doing that on purpose.
 - **Markdown as you type.** Headings, lists, quotes, bold, italic, code and checkboxes are
   styled in place. The text itself is never rewritten, so what you see is exactly what lands on
   disk. Lists carry on to the next line and end themselves when you leave an item empty, the way
@@ -22,6 +25,9 @@ nothing in it polls.
   list; opening a note *moves* it back onto the pad, so a note is never in two places at once.
 - **Sends to Obsidian.** Pick a vault and a folder — read from Obsidian's own config, so it's a
   dropdown, not a path to type — and one shortcut writes the note there and opens it.
+- **As see-through as you like.** The background slider runs from solid to nothing, and it
+  fades *only* the background — at 0% the text is left floating over the desktop, still
+  perfectly readable.
 - **One key to get to it.** ⌥Space by default, and every shortcut is rebindable. Because
   `RegisterEventHotKey` reports success for combinations macOS has already claimed, Settings
   checks your actual system shortcuts and warns you before a binding silently does nothing.
@@ -54,10 +60,11 @@ Everything lives in `~/Lapp/` as plain files. If the app ever dies, your notes a
 
 | | |
 |---|---|
-| `current.md` | the live draft, autosaved 800 ms after the last keystroke |
+| `drafts/` | one file per open tab, autosaved 800 ms after the last keystroke |
 | `notes/` | filed notes, `yyyy-MM-dd-HHmm-slug.md`, with `created` / `filed` front matter |
 | `trash/` | binned notes, purged after 30 days |
-| `settings.json` | display, edge, size, appearance, hotkeys, vault |
+| `state.json` | which tabs are open, and which one you were on |
+| `settings.json` | display, edge, size, appearance, background, hotkeys, vault |
 
 ## Default shortcuts
 
@@ -66,12 +73,17 @@ Everything lives in `~/Lapp/` as plain files. If the app ever dies, your notes a
 | ⌥Space | focus the pad (global) |
 | ⌘↩ | file the note |
 | ⌘⌫ | discard it |
+| ⌘T | new tab |
+| ⌘W | close tab |
+| ⌃⇥ / ⌃⇧⇥ | next / previous tab |
+| ⌘1 … ⌘9 | jump straight to a tab (⌘9 is the last one) |
 | ⌘L | history |
 | ⌘, | settings |
 | ⌘⇧O | send to Obsidian |
 | ⎋ | hand focus back to the app you came from |
 
-All rebindable in Settings. Everything but ⌥Space only fires while the pad has focus.
+All rebindable in Settings except ⌘1 … ⌘9. Everything but ⌥Space only fires while the pad
+has focus.
 
 ## Layout
 

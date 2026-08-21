@@ -29,8 +29,15 @@ final class AppController: NSObject, NSApplicationDelegate, PadRootDelegate {
         panel.reposition()
         panel.orderFrontRegardless()
 
+        refreshTabs()
+
         lastFocusBinding = Settings.shared.binding(for: .focusPad)
         Hotkeys.shared.handler = { [weak self] action in self?.padPerform(action) }
+        Hotkeys.shared.tabHandler = { [weak self] digit in
+            guard let self else { return }
+            // ⌘9 is the last tab, as it is in a browser.
+            self.selectTab(digit == 9 ? Store.shared.tabs.count - 1 : digit - 1)
+        }
         Hotkeys.shared.start()
 
         LoginItem.enableIfNeeded()
@@ -91,8 +98,12 @@ final class AppController: NSObject, NSApplicationDelegate, PadRootDelegate {
 
     private func applyAppearance() {
         panel.appearance = Theme.currentAppearance
-        panel.alphaValue = min(max(Settings.shared.data.opacity, 0.35), 1.0)
+        // The window itself is never faded. Opacity is a property of the card's ground
+        // colour, so the text on it stays fully legible at any setting -- see
+        // `Theme.backgroundAlpha`.
+        panel.alphaValue = 1.0
         container.applyTheme(Theme.current)
+        panel.invalidateShadow()
     }
 
     /// Changes that move or resize the strip are worth animating; a font-size nudge isn't.
@@ -135,6 +146,17 @@ final class AppController: NSObject, NSApplicationDelegate, PadRootDelegate {
         let work = DispatchWorkItem { Store.shared.saveDraft(text) }
         saveWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: work)
+        refreshTabs()
+    }
+
+    /// The bar's labels. The active tab reads from the live text rather than the file, so
+    /// the title follows the first line as it is typed without touching the disk.
+    private func refreshTabs() {
+        let store = Store.shared
+        let titles = store.tabs.indices.map { index -> String in
+            index == store.activeIndex ? Store.title(of: root.text) : store.title(ofTabAt: index)
+        }
+        root.tabBar.setTabs(titles, active: store.activeIndex)
     }
 
     private func flushDraft() {
@@ -151,7 +173,73 @@ final class AppController: NSObject, NSApplicationDelegate, PadRootDelegate {
         case .history:       toggleHistory()
         case .settings:      toggleSettings()
         case .sendToObsidian: sendCurrentToObsidian()
+        case .newTab:        newTab()
+        case .closeTab:      closeTab(at: Store.shared.activeIndex)
+        case .nextTab:       stepTab(1)
+        case .previousTab:   stepTab(-1)
         }
+    }
+
+    // MARK: - Tabs
+
+    /// Every tab switch goes through here: the outgoing draft is flushed before the
+    /// incoming one is read, so a pending autosave can never land in the wrong file.
+    private func showActiveTab() {
+        root.text = Store.shared.loadDraft()
+        refreshTabs()
+        root.tabBar.revealActive()
+        root.focusText(moveCaretToEnd: true)
+    }
+
+    func padSelectTab(_ index: Int) { selectTab(index) }
+
+    func padCloseTab(_ index: Int) { closeTab(at: index) }
+
+    private func selectTab(_ index: Int) {
+        guard Store.shared.tabs.indices.contains(index), index != Store.shared.activeIndex else { return }
+        flushDraft()
+        Store.shared.select(index)
+        showActiveTab()
+    }
+
+    private func stepTab(_ delta: Int) {
+        guard Store.shared.tabs.count > 1 else { return }
+        flushDraft()
+        Store.shared.step(delta)
+        showActiveTab()
+    }
+
+    private func newTab() {
+        flushDraft()
+        Store.shared.newTab()
+        showActiveTab()
+    }
+
+    /// Closing files whatever was on the tab rather than binning it -- the same bargain
+    /// history makes when it swaps a note onto the pad. ✕ is still there for throwing
+    /// something away on purpose.
+    private func closeTab(at index: Int) {
+        guard Store.shared.tabs.indices.contains(index) else { return }
+        // Unconditionally, even when closing another tab: closing one to the left shifts
+        // the active index, and a pending autosave would then land in the wrong file.
+        flushDraft()
+        let wasActive = index == Store.shared.activeIndex
+        let text = wasActive ? root.text : Store.shared.text(ofTabAt: index)
+        var filed = false
+        if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            filed = Store.shared.file(text, createdAt: Store.shared.tabs[index].created) != nil
+        }
+        // Closing the last tab empties it in place rather than removing it.
+        let emptied = Store.shared.tabs.count == 1
+        Store.shared.closeTab(at: index)
+        // Closing someone else's tab leaves the pad alone -- reloading it would throw the
+        // caret to the end of whatever you were in the middle of writing.
+        if wasActive || emptied {
+            showActiveTab()
+        } else {
+            refreshTabs()
+        }
+        if filed { root.flash("Filed") }
     }
 
     func padToggleMinimized() {
@@ -282,6 +370,7 @@ final class AppController: NSObject, NSApplicationDelegate, PadRootDelegate {
         }
         root.text = ""
         Store.shared.saveDraft("")
+        refreshTabs()
     }
 
     private func discardNote() {
@@ -289,6 +378,7 @@ final class AppController: NSObject, NSApplicationDelegate, PadRootDelegate {
         Store.shared.discard(root.text)
         root.text = ""
         Store.shared.saveDraft("")
+        refreshTabs()
         root.flash("Discarded")
     }
 
@@ -306,11 +396,14 @@ final class AppController: NSObject, NSApplicationDelegate, PadRootDelegate {
         view.onOpen = { [weak self] note in
             guard let self else { return }
             self.flushDraft()
-            // Anything already on the pad is filed first, so nothing is lost by swapping.
+            // It lands in a tab of its own unless the pad is empty, so nothing has to be
+            // filed out of the way to make room for it.
             if !self.root.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Store.shared.file(self.root.text)
+                Store.shared.newTab()
             }
             self.root.text = Store.shared.take(note)
+            self.refreshTabs()
+            self.root.tabBar.revealActive()
             self.root.dismissOverlay()
             self.root.focusText(moveCaretToEnd: true)
         }
@@ -347,6 +440,7 @@ final class AppController: NSObject, NSApplicationDelegate, PadRootDelegate {
             Store.shared.discard("")   // resets the draft's created stamp
             root.text = ""
             Store.shared.saveDraft("")
+            refreshTabs()
         }
     }
 

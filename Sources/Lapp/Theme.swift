@@ -39,6 +39,22 @@ struct Theme {
         isDark: true
     )
 
+    /// The configured background opacity, 0 -- 1.
+    ///
+    /// It is applied to the card's ground and the tab, and to nothing else. Fading the
+    /// whole window (`panel.alphaValue`) would take the text with it, which is exactly
+    /// what the setting is meant not to do.
+    static var backgroundAlpha: CGFloat {
+        min(max(Settings.shared.data.opacity, 0), 1)
+    }
+
+    /// A ground colour at the configured background opacity.
+    static func ground(_ color: NSColor) -> NSColor {
+        color.withAlphaComponent(color.alphaComponent * backgroundAlpha)
+    }
+
+    var groundSurface: NSColor { Theme.ground(surface) }
+
     static var current: Theme {
         switch Settings.shared.data.appearance {
         case .light: return .light

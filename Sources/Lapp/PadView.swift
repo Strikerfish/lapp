@@ -3,6 +3,8 @@ import AppKit
 protocol PadRootDelegate: AnyObject {
     func padTextDidChange(_ text: String)
     func padPerform(_ action: LappAction)
+    func padSelectTab(_ index: Int)
+    func padCloseTab(_ index: Int)
     func padEscape()
     func padToggleMinimized()
     func padTabDragged(to screenPoint: NSPoint)
@@ -199,7 +201,9 @@ final class EdgeTabView: NSView {
 
     func applyTheme(_ theme: Theme) {
         self.theme = theme
-        layer?.backgroundColor = (hovering ? theme.buttonHover : theme.tab).cgColor
+        // The tab is part of the strip's surface, so it fades with it. The grip dots are
+        // drawn at full strength, which is what keeps the handle findable at 0%.
+        layer?.backgroundColor = Theme.ground(hovering ? theme.buttonHover : theme.tab).cgColor
         needsDisplay = true
     }
 
@@ -279,7 +283,9 @@ final class PadRootView: NSView {
 
     let textView = LappTextView()
     let styler = MarkdownStyler()
+    let tabBar = TabBarView()
 
+    private let tabHairline = NSView()
     private let scrollView = NSScrollView()
     private let bar = NSView()
     private let hairline = NSView()
@@ -351,21 +357,40 @@ final class PadRootView: NSView {
         status.lineBreakMode = .byTruncatingMiddle
         status.translatesAutoresizingMaskIntoConstraints = false
 
+        tabBar.translatesAutoresizingMaskIntoConstraints = false
+        tabBar.onSelect = { [weak self] index in self?.delegate?.padSelectTab(index) }
+        tabBar.onClose = { [weak self] index in self?.delegate?.padCloseTab(index) }
+        tabBar.onNew = { [weak self] in self?.delegate?.padPerform(.newTab) }
+        tabHairline.wantsLayer = true
+        tabHairline.translatesAutoresizingMaskIntoConstraints = false
+
         bar.addSubview(stack)
         bar.addSubview(status)
+        addSubview(tabBar)
+        addSubview(tabHairline)
         addSubview(scrollView)
         addSubview(placeholder)
         addSubview(hairline)
         addSubview(bar)
 
         NSLayoutConstraint.activate([
+            tabBar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            tabBar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            tabBar.topAnchor.constraint(equalTo: topAnchor),
+            tabBar.heightAnchor.constraint(equalToConstant: TabBarView.Metrics.height),
+
+            tabHairline.leadingAnchor.constraint(equalTo: leadingAnchor),
+            tabHairline.trailingAnchor.constraint(equalTo: trailingAnchor),
+            tabHairline.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            tabHairline.heightAnchor.constraint(equalToConstant: 1),
+
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: topAnchor),
+            scrollView.topAnchor.constraint(equalTo: tabHairline.bottomAnchor),
             scrollView.bottomAnchor.constraint(equalTo: hairline.topAnchor),
 
             placeholder.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            placeholder.topAnchor.constraint(equalTo: topAnchor, constant: 13),
+            placeholder.topAnchor.constraint(equalTo: tabHairline.bottomAnchor, constant: 13),
 
             hairline.leadingAnchor.constraint(equalTo: leadingAnchor),
             hairline.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -393,9 +418,14 @@ final class PadRootView: NSView {
 
     func applyTheme(_ theme: Theme) {
         self.theme = theme
-        layer?.backgroundColor = theme.surface.cgColor
+        // The card's ground is the only thing the opacity setting touches. Everything
+        // drawn on it -- text, buttons, the overlays -- keeps its own alpha, which is
+        // why the overlays are transparent and this layer shows through them.
+        layer?.backgroundColor = theme.groundSurface.cgColor
         bar.layer?.backgroundColor = NSColor.clear.cgColor
         hairline.layer?.backgroundColor = theme.hairline.cgColor
+        tabHairline.layer?.backgroundColor = theme.hairline.cgColor
+        tabBar.applyTheme(theme)
         placeholder.textColor = theme.muted
         status.textColor = theme.muted
         buttons.forEach { $0.applyTheme(theme) }
@@ -440,7 +470,7 @@ final class PadRootView: NSView {
     }
 
     private func updatePlaceholder() {
-        placeholder.isHidden = !textView.string.isEmpty
+        placeholder.isHidden = !textView.string.isEmpty || hasOverlay
     }
 
     // MARK: Actions
@@ -467,6 +497,10 @@ final class PadRootView: NSView {
 
     func present(_ view: NSView) {
         dismissOverlay(animated: false)
+        // Hidden immediately, not on completion: the overlays draw no background of their
+        // own so the card's ground can carry the opacity, and text left underneath would
+        // read straight through them.
+        setPadContentHidden(true)
         view.translatesAutoresizingMaskIntoConstraints = false
         addSubview(view)
         let offset = view.trailingAnchor.constraint(equalTo: trailingAnchor, constant: bounds.width)
@@ -486,6 +520,7 @@ final class PadRootView: NSView {
     func dismissOverlay(animated: Bool = true) {
         guard let view = overlay else { return }
         overlay = nil
+        setPadContentHidden(false)
         guard animated, let offset = overlayOffset else {
             overlayOffset = nil
             view.removeFromSuperview()
@@ -497,6 +532,15 @@ final class PadRootView: NSView {
             offset.animator().constant = bounds.width
             view.animator().alphaValue = 0
         }, then: { view.removeFromSuperview() })
+    }
+
+    /// The pad itself, minus the button bar, which stays visible behind an overlay.
+    private func setPadContentHidden(_ hidden: Bool) {
+        scrollView.isHidden = hidden
+        tabBar.isHidden = hidden
+        tabHairline.isHidden = hidden
+        // Not via `updatePlaceholder`: this runs before `overlay` is assigned.
+        placeholder.isHidden = hidden || !textView.string.isEmpty
     }
 
     // MARK: Right-click menu

@@ -2,10 +2,16 @@ import AppKit
 
 // MARK: - Actions
 
+/// The order here is the order Settings lists them in, and the order the local key
+/// monitor tests them in -- so a more specific combination must come before a looser one.
 enum LappAction: String, CaseIterable, Codable {
     case focusPad
     case fileNote
     case discardNote
+    case newTab
+    case closeTab
+    case nextTab
+    case previousTab
     case history
     case settings
     case sendToObsidian
@@ -15,6 +21,10 @@ enum LappAction: String, CaseIterable, Codable {
         case .focusPad: return "Focus pad"
         case .fileNote: return "File"
         case .discardNote: return "Discard"
+        case .newTab: return "New tab"
+        case .closeTab: return "Close tab"
+        case .nextTab: return "Next tab"
+        case .previousTab: return "Previous tab"
         case .history: return "History"
         case .settings: return "Settings"
         case .sendToObsidian: return "Send to Obsidian"
@@ -29,6 +39,10 @@ enum LappAction: String, CaseIterable, Codable {
         case .focusPad:        return KeyBinding(keyCode: 49, modifiers: [.option])            // ⌥Space
         case .fileNote:        return KeyBinding(keyCode: 36, modifiers: [.command])           // ⌘↩
         case .discardNote:     return KeyBinding(keyCode: 51, modifiers: [.command])           // ⌘⌫
+        case .newTab:          return KeyBinding(keyCode: 17, modifiers: [.command])           // ⌘T
+        case .closeTab:        return KeyBinding(keyCode: 13, modifiers: [.command])           // ⌘W
+        case .nextTab:         return KeyBinding(keyCode: 48, modifiers: [.control])           // ⌃⇥
+        case .previousTab:     return KeyBinding(keyCode: 48, modifiers: [.control, .shift])   // ⌃⇧⇥
         case .history:         return KeyBinding(keyCode: 37, modifiers: [.command])           // ⌘L
         case .settings:        return KeyBinding(keyCode: 43, modifiers: [.command])           // ⌘,
         case .sendToObsidian:  return KeyBinding(keyCode: 31, modifiers: [.command, .shift])   // ⌘⇧O
@@ -213,10 +227,12 @@ enum Paths {
         .appendingPathComponent("Lapp")
     static var notes: URL { root.appendingPathComponent("notes") }
     static var trash: URL { root.appendingPathComponent("trash") }
+    static var drafts: URL { root.appendingPathComponent("drafts") }
+    /// Where the one draft lived before tabs. Read once, by the migration in `Store`.
     static var draft: URL { root.appendingPathComponent("current.md") }
 
     static func ensureRoot() {
-        for dir in [root, notes, trash] {
+        for dir in [root, notes, trash, drafts] {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         }
     }

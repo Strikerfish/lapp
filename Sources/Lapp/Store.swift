@@ -7,6 +7,18 @@ struct NoteSummary {
     var filed: Date
 }
 
+/// One open tab: a draft file in `drafts/` plus the moment it was started. The id is the
+/// filename stem, so a tab and its file can never drift apart.
+struct DraftTab: Codable, Equatable {
+    var id: String
+    var created: Date
+
+    init(id: String = UUID().uuidString, created: Date = Date()) {
+        self.id = id
+        self.created = created
+    }
+}
+
 /// Notes are plain markdown files with a small YAML front-matter block. If the app ever
 /// dies, the notes are just files.
 final class Store {
@@ -14,59 +26,180 @@ final class Store {
 
     private let fm = FileManager.default
     private let stateURL = Paths.root.appendingPathComponent("state.json")
-    private(set) var draftCreated: Date
 
-    private struct State: Codable { var created: Date }
+    /// The open tabs, left to right, and which one is on the pad. There is always at
+    /// least one -- closing the last tab empties it rather than leaving nothing.
+    private(set) var tabs: [DraftTab] = []
+    private(set) var activeIndex: Int = 0
+
+    /// Titles of the tabs that aren't on the pad. The active one is drawn from the live
+    /// text instead, so this is never read for it and typing costs no disk access.
+    private var titleCache: [String: String] = [:]
+
+    var activeTab: DraftTab { tabs[activeIndex] }
+    var draftCreated: Date { activeTab.created }
+
+    /// `tabs`/`active` are both optional so a state file written by an older build --
+    /// which held a single `created` stamp for `current.md` -- still decodes, and the
+    /// migration below turns it into the first tab.
+    private struct State: Codable {
+        var tabs: [DraftTab]?
+        var active: Int?
+        var created: Date?
+    }
 
     private init() {
         Paths.ensureRoot()
-        if let bytes = try? Data(contentsOf: stateURL),
-           let state = try? JSONDecoder().decode(State.self, from: bytes) {
-            draftCreated = state.created
-        } else {
-            draftCreated = Date()
+        let state = (try? Data(contentsOf: stateURL)).flatMap {
+            try? Self.decoder.decode(State.self, from: $0)
         }
+        tabs = state?.tabs ?? []
+        activeIndex = state?.active ?? 0
+        // Drop tabs whose file has gone missing, then make sure one is left.
+        tabs = tabs.filter { fm.fileExists(atPath: url(forTab: $0).path) }
+        if tabs.isEmpty { migrateLegacyDraft(created: state?.created) }
+        activeIndex = min(max(activeIndex, 0), tabs.count - 1)
+        writeState()
+    }
+
+    /// Everything that existed before tabs lived in `current.md`, with its start time in
+    /// `state.json`. It becomes tab one, and the old file is removed so there is exactly
+    /// one place a draft can be.
+    private func migrateLegacyDraft(created: Date?) {
+        // `state.json` only existed once something had been filed, so fall back to when
+        // `current.md` was created rather than stamping the note as new.
+        let legacyCreated = try? Paths.draft.resourceValues(forKeys: [.creationDateKey]).creationDate
+        let tab = DraftTab(created: created ?? legacyCreated.flatMap { $0 } ?? Date())
+        tabs = [tab]
+        activeIndex = 0
+        let legacy = (try? String(contentsOf: Paths.draft, encoding: .utf8)) ?? ""
+        try? legacy.write(to: url(forTab: tab), atomically: true, encoding: .utf8)
+        try? fm.removeItem(at: Paths.draft)
+    }
+
+    // MARK: - Tabs
+
+    private func url(forTab tab: DraftTab) -> URL {
+        Paths.drafts.appendingPathComponent(tab.id + ".md")
+    }
+
+    /// The label for a tab: the note's first real line, or "" for an untouched one.
+    func title(ofTabAt index: Int) -> String {
+        guard tabs.indices.contains(index) else { return "" }
+        let tab = tabs[index]
+        if let cached = titleCache[tab.id] { return cached }
+        let body = (try? String(contentsOf: url(forTab: tab), encoding: .utf8)) ?? ""
+        let title = Self.title(of: body)
+        titleCache[tab.id] = title
+        return title
+    }
+
+    func select(_ index: Int) {
+        guard tabs.indices.contains(index), index != activeIndex else { return }
+        activeIndex = index
+        writeState()
+    }
+
+    func step(_ delta: Int) {
+        guard tabs.count > 1 else { return }
+        let count = tabs.count
+        select(((activeIndex + delta) % count + count) % count)
+    }
+
+    /// Opens a new tab to the right of the active one and selects it.
+    @discardableResult
+    func newTab() -> Int {
+        Paths.ensureRoot()
+        let tab = DraftTab()
+        try? "".write(to: url(forTab: tab), atomically: true, encoding: .utf8)
+        let index = activeIndex + 1
+        tabs.insert(tab, at: min(index, tabs.count))
+        activeIndex = min(index, tabs.count - 1)
+        writeState()
+        return activeIndex
+    }
+
+    /// Removes a tab and its draft file. The last tab is never removed -- it is emptied,
+    /// so there is always something on the pad.
+    func closeTab(at index: Int) {
+        guard tabs.indices.contains(index) else { return }
+        if tabs.count == 1 {
+            startFreshDraft()
+            return
+        }
+        let tab = tabs.remove(at: index)
+        titleCache.removeValue(forKey: tab.id)
+        try? fm.removeItem(at: url(forTab: tab))
+        if activeIndex >= index { activeIndex = max(0, activeIndex - 1) }
+        activeIndex = min(activeIndex, tabs.count - 1)
+        writeState()
     }
 
     // MARK: - Draft
 
     func loadDraft() -> String {
-        (try? String(contentsOf: Paths.draft, encoding: .utf8)) ?? ""
+        let body = (try? String(contentsOf: url(forTab: activeTab), encoding: .utf8)) ?? ""
+        titleCache[activeTab.id] = Self.title(of: body)
+        return body
     }
 
     func saveDraft(_ text: String) {
         Paths.ensureRoot()
-        try? text.write(to: Paths.draft, atomically: true, encoding: .utf8)
+        titleCache[activeTab.id] = Self.title(of: text)
+        try? text.write(to: url(forTab: activeTab), atomically: true, encoding: .utf8)
     }
 
+    private static let decoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .iso8601
+        return d
+    }()
+
     private func writeState() {
+        Paths.ensureRoot()
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        if let bytes = try? encoder.encode(State(created: draftCreated)) {
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let bytes = try? encoder.encode(State(tabs: tabs, active: activeIndex, created: nil)) {
             try? bytes.write(to: stateURL, options: .atomic)
         }
     }
 
+    /// Empties the active tab and restarts its clock -- what ✓ and ✕ leave behind.
     private func startFreshDraft() {
-        draftCreated = Date()
+        tabs[activeIndex].created = Date()
+        titleCache[activeTab.id] = ""
         writeState()
-        try? "".write(to: Paths.draft, atomically: true, encoding: .utf8)
+        try? "".write(to: url(forTab: activeTab), atomically: true, encoding: .utf8)
+    }
+
+    /// The text of a tab that isn't on the pad -- read straight off disk, since the pad
+    /// only ever holds the active one.
+    func text(ofTabAt index: Int) -> String {
+        guard tabs.indices.contains(index) else { return "" }
+        return (try? String(contentsOf: url(forTab: tabs[index]), encoding: .utf8)) ?? ""
     }
 
     // MARK: - File / discard
 
-    /// Commits the pad to history. Returns the written file, or nil if there was nothing to file.
+    /// Commits the pad to history and empties the tab. Returns the written file, or nil
+    /// if there was nothing to file.
     @discardableResult
     func file(_ text: String) -> URL? {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            startFreshDraft()
-            return nil
-        }
-        Paths.ensureRoot()
-        let url = uniqueURL(in: Paths.notes, date: draftCreated, title: Self.title(of: text))
-        let document = Self.frontMatter(created: draftCreated, filed: Date()) + text
-        try? document.write(to: url, atomically: true, encoding: .utf8)
+        let url = file(text, createdAt: draftCreated)
         startFreshDraft()
+        return url
+    }
+
+    /// Writes a note to history without touching the pad -- what closing a tab does with
+    /// whatever was on it.
+    @discardableResult
+    func file(_ text: String, createdAt created: Date) -> URL? {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        Paths.ensureRoot()
+        let url = uniqueURL(in: Paths.notes, date: created, title: Self.title(of: text))
+        let document = Self.frontMatter(created: created, filed: Date()) + text
+        try? document.write(to: url, atomically: true, encoding: .utf8)
         return url
     }
 
@@ -102,12 +235,13 @@ final class Store {
             .sorted { $0.filed > $1.filed }
     }
 
-    /// Takes a note off the wall and back onto the pad. It leaves history so a note can
-    /// never exist in two places at once; the pad's ✓ puts it back, ✕ bins it.
+    /// Takes a note off the wall and back onto the pad, into whichever tab is active. It
+    /// leaves history so a note can never exist in two places at once; the pad's ✓ puts
+    /// it back, ✕ bins it.
     func take(_ note: NoteSummary) -> String {
         let raw = (try? String(contentsOf: note.url, encoding: .utf8)) ?? ""
         let body = Self.stripFrontMatter(raw)
-        draftCreated = Self.createdDate(raw) ?? note.filed
+        tabs[activeIndex].created = Self.createdDate(raw) ?? note.filed
         writeState()
         saveDraft(body)
         try? fm.removeItem(at: note.url)

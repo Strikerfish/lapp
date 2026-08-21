@@ -27,14 +27,19 @@ from `~/Lapp-build/dist` would pin login to a build directory.
 
 | | |
 |---|---|
-| `current.md` | the live draft, autosaved 800 ms after the last keystroke |
+| `drafts/` | one file per open tab, `<uuid>.md`, plain text, autosaved 800 ms after the last keystroke |
 | `notes/` | filed notes, `yyyy-MM-dd-HHmm-slug.md`, YAML front matter (`created`, `filed`) |
 | `trash/` | discarded notes, purged at 30 days (once at launch, no timer) |
-| `state.json` | the draft's `created` stamp |
-| `settings.json` | display, edge, width, appearance, font size, hotkeys, vault |
+| `state.json` | the open tabs (`id`, `created`) and which one is active |
+| `settings.json` | display, edge, width, appearance, font size, background opacity, hotkeys, vault |
 
 Opening a note from history *moves* it back onto the pad, so a note is never in two places.
-✓ files it again, ✕ bins it.
+It lands in a tab of its own unless the pad is empty. ✓ files it again, ✕ bins it.
+
+Before tabs there was a single `current.md` with its start time in `state.json`.
+`Store.migrateLegacyDraft` turns that into tab one and deletes the old file, so there is
+exactly one place a draft can live. It runs whenever no usable tabs are found, which also
+covers a `state.json` that has been hand-edited into nonsense.
 
 The 30-day purge reads `contentModificationDate`, and a move preserves it — so `Store.delete`
 restamps the file after moving it into `trash/`. Without that, binning a note filed two months
@@ -53,11 +58,51 @@ edge or another screen; it snaps to whichever edge you release nearest.
 more code, not less.
 
 Height is a fraction of `visibleFrame` (default 0.48), vertically centred. Width, height,
-opacity, text size and appearance are all sliders in Settings; there are no drag grips.
-Opacity is `panel.alphaValue` — the whole window, text included, not just the background.
+background, text size and appearance are all sliders in Settings; there are no drag grips.
+
+**Background opacity is the card's ground colour, never `panel.alphaValue`.** Fading the
+window takes the text with it, which is the one thing the setting must not do. So
+`Theme.backgroundAlpha` multiplies into the card's surface and the tab, and nothing else —
+the range runs to 0, where the text is left floating over the desktop. Two consequences
+that are easy to undo by accident:
+
+- The history and settings overlays draw **no background of their own** (`.clear`). They
+  sit on the card's ground, so one translucent layer is all there is to see through.
+  Giving them a surface colour again would stack two and make them visibly more solid
+  than the pad below them.
+- Because they are transparent, `PadRootView.setPadContentHidden` hides the text view,
+  the tab bar and the placeholder while an overlay is up — otherwise the note reads
+  straight through the settings. It hides them immediately, not on animation completion.
+
+The tab's grip dots are drawn at full strength on purpose: at 0% they are the only thing
+left to grab.
 
 `Motion.swift` holds the one timing curve and the durations. Animations should be added
 there rather than inline, so they all move the same way.
+
+## Tabs
+
+Several notes are open at once; the bar across the top of the card switches between them.
+Only the active one is on the pad — the rest are files in `drafts/`, read when you switch.
+
+- **Every change of `activeIndex` flushes the draft first.** The autosave is a debounced
+  `DispatchWorkItem` that calls `Store.saveDraft`, which resolves the active tab *when it
+  runs* — so an unflushed keystroke would land in whichever tab you had just switched to.
+  `AppController.flushDraft` cancels it and writes synchronously. This applies to closing
+  a tab to the *left* of the active one too, which shifts the index without changing the
+  selection.
+- **Closing a tab files what was on it**, rather than binning it — the same bargain
+  history makes when it swaps a note onto the pad. ✕ is still there for throwing something
+  away deliberately. The last tab is never removed, only emptied, so there is always
+  something on the pad.
+- `TabBarView` lays its chips out by hand for the same reason `PadContainerView` does: they
+  share whatever width the strip has, down to `minChip` and then scrolling.
+- The active chip's label comes from the **live text**, not the file, so following the
+  first line as it is typed costs no disk access. `setTabs` therefore only repaints a chip
+  when the selection actually moved; it runs on every keystroke.
+- ⌘1 … ⌘9 are fixed rather than rebindable — nine more rows would bury the ten bindings in
+  Settings that are worth changing. They are tested in `Hotkeys.handleLocal` *after* the
+  bindings, so rebinding something to ⌘1 still wins.
 
 ## The minimise swipe
 
@@ -96,6 +141,10 @@ the frame while this runs.
 - List continuation lives in `ListContinuation.swift` as a pure function on (line, caret) so
   it can be tested without driving the UI — `LappTextView.insertNewline` is only the hook.
   It goes through `insertText`, which is what puts it in the undo stack.
+- **`Store.State` holds `tabs` and `active` as optionals**, and still carries the legacy
+  `created`, for the same reason as `SettingsData` below: a missing key must not throw
+  away the file. It also decodes ISO-8601 dates, which the encoder has always written —
+  the old synthesised decoder expected the default format and silently lost the stamp.
 - **`SettingsData` decodes key by key on purpose.** Swift's synthesised `init(from:)` throws
   on a missing key *even when the property has a default*, so adding one field would silently
   reset every setting the user has. Any new field must go in that hand-written initialiser.

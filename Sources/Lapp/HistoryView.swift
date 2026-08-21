@@ -131,7 +131,9 @@ final class HistoryView: NSView, Themed {
 
     func applyTheme(_ theme: Theme) {
         self.theme = theme
-        layer?.backgroundColor = theme.surface.cgColor
+        // No ground of its own: the card's translucent surface shows through, so the
+        // opacity setting applies here too instead of stopping at the overlay's edge.
+        layer?.backgroundColor = NSColor.clear.cgColor
         hairline.layer?.backgroundColor = theme.hairline.cgColor
         empty.textColor = theme.muted
         closeButton.applyTheme(theme)

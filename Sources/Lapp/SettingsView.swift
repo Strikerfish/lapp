@@ -1,7 +1,7 @@
 import AppKit
 
-/// Three sections, no scrolling, no tabs. The moment it needs either, something has been
-/// added that shouldn't have been.
+/// Three sections -- hotkeys, appearance, vault -- in one scrolling column. No tabs: the
+/// moment this needs categorising, something has been added that shouldn't have been.
 final class SettingsView: NSView, Themed {
     var onClose: (() -> Void)?
 
@@ -163,6 +163,14 @@ final class SettingsView: NSView, Themed {
             }
         }
 
+        let jumps = NSTextField(labelWithString: "⌘1 … ⌘9 jump straight to a tab (⌘9 is the last one).")
+        jumps.font = NSFont.systemFont(ofSize: 10)
+        jumps.lineBreakMode = .byWordWrapping
+        jumps.maximumNumberOfLines = 2
+        sectionLabels.append(jumps)
+        stack.addArrangedSubview(jumps)
+        jumps.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+
         stack.setCustomSpacing(16, after: stack.arrangedSubviews.last!)
     }
 
@@ -204,8 +212,10 @@ final class SettingsView: NSView, Themed {
         stack.addArrangedSubview(line)
         line.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
-        addSlider(opacitySlider, value: opacityValue, title: "Opacity",
-                  min: 40, max: 100, action: #selector(opacityChanged))
+        // 0 is deliberate: at nothing the card's ground disappears and the text is left
+        // floating over the desktop. Only the ground fades, so it stays readable.
+        addSlider(opacitySlider, value: opacityValue, title: "Background",
+                  min: 0, max: 100, action: #selector(opacityChanged))
         addSlider(widthSlider, value: widthValue, title: "Width",
                   min: 220, max: 700, action: #selector(widthChanged))
         let heightLine = addSlider(heightSlider, value: heightValue, title: "Height",
@@ -402,7 +412,9 @@ final class SettingsView: NSView, Themed {
 
     func applyTheme(_ theme: Theme) {
         self.theme = theme
-        layer?.backgroundColor = theme.surface.cgColor
+        // No ground of its own: the card's translucent surface shows through, so the
+        // opacity setting applies here too instead of stopping at the overlay's edge.
+        layer?.backgroundColor = NSColor.clear.cgColor
         hairline.layer?.backgroundColor = theme.hairline.cgColor
         titleLabel.textColor = theme.text
         closeButton.applyTheme(theme)

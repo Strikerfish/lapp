@@ -12,6 +12,9 @@ final class Hotkeys {
     static let shared = Hotkeys()
 
     var handler: ((LappAction) -> Void)?
+    /// ⌘1 … ⌘9 jump straight to a tab. Fixed rather than rebindable: nine more rows would
+    /// bury the ten bindings in Settings that are worth changing.
+    var tabHandler: ((Int) -> Void)?
     /// Set while a hotkey is being recorded, so recording doesn't trigger the action.
     var isSuspended = false
     private(set) var globalError: String?
@@ -100,6 +103,17 @@ final class Hotkeys {
                 return true
             }
         }
+        // Tested after the bindings, so rebinding something to ⌘1 still wins.
+        if let digit = Self.digitKeys[event.keyCode],
+           event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+           let tabHandler {
+            tabHandler(digit)
+            return true
+        }
         return false
     }
+
+    private static let digitKeys: [UInt16: Int] = [
+        18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7, 28: 8, 25: 9
+    ]
 }
