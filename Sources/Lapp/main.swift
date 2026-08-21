@@ -109,7 +109,7 @@ final class AppController: NSObject, NSApplicationDelegate, PadRootDelegate {
     /// Changes that move or resize the strip are worth animating; a font-size nudge isn't.
     private func geometryKey() -> String {
         let data = Settings.shared.data
-        return "\(data.edge.rawValue)|\(data.minimized)|\(data.displayID ?? "auto")"
+        return "\(data.edge.rawValue)|\(data.free)|\(data.minimized)|\(data.displayID ?? "auto")"
     }
 
     @objc private func systemAppearanceChanged() {
@@ -177,7 +177,30 @@ final class AppController: NSObject, NSApplicationDelegate, PadRootDelegate {
         case .closeTab:      closeTab(at: Store.shared.activeIndex)
         case .nextTab:       stepTab(1)
         case .previousTab:   stepTab(-1)
+        case .toggleFree:    toggleFree()
         }
+    }
+
+    // MARK: - Placement
+
+    /// Off the edge and back again. Nothing moves at the moment of the switch -- the
+    /// strip's current position becomes its free position, and snapping back picks
+    /// whichever edge it is nearer -- so the button reads as unlocking, not as jumping.
+    private func toggleFree() {
+        guard let screen = ScreenAnchor.targetScreen() else { return }
+        let frame = ScreenAnchor.expandedEquivalent(of: panel.frame, on: screen)
+        let position = ScreenAnchor.fractions(of: frame, on: screen)
+        let goingFree = !Settings.shared.data.free
+        Settings.shared.update {
+            $0.free = goingFree
+            $0.horizontalFraction = position.horizontal
+            $0.verticalFraction = position.vertical
+            if !goingFree {
+                $0.edge = frame.midX < screen.visibleFrame.midX ? .left : .right
+            }
+        }
+        panel.reposition(animated: true)
+        root.flash(goingFree ? "Free placement" : "Snapped to the edge")
     }
 
     // MARK: - Tabs
@@ -310,9 +333,11 @@ final class AppController: NSObject, NSApplicationDelegate, PadRootDelegate {
     func padTabDragged(to screenPoint: NSPoint) {
         if dragAnchor == nil { dragAnchor = (panel.frame.origin, screenPoint) }
         guard let anchor = dragAnchor else { return }
-        // Horizontal only -- the strip is always vertically centred on its screen.
+        // Both axes, in either mode. Pinned, the drop snaps x back to the edge and keeps
+        // the height it was let go at; free, it keeps both.
         var frame = panel.frame
         frame.origin.x = anchor.origin.x + (screenPoint.x - anchor.mouse.x)
+        frame.origin.y = anchor.origin.y + (screenPoint.y - anchor.mouse.y)
         panel.setFrame(frame, display: true)
     }
 
@@ -322,10 +347,17 @@ final class AppController: NSObject, NSApplicationDelegate, PadRootDelegate {
             panel.reposition(animated: true)
             return
         }
+        // Measured from the window, not the pointer: the tab is off at one side of it.
+        let dropped = ScreenAnchor.expandedEquivalent(of: panel.frame, on: drop.screen)
+        let position = ScreenAnchor.fractions(of: dropped, on: drop.screen)
         let id = ScreenAnchor.displayID(of: drop.screen)
+        let free = Settings.shared.data.free
         Settings.shared.update {
             $0.displayID = id
-            $0.edge = drop.edge
+            $0.horizontalFraction = position.horizontal
+            $0.verticalFraction = position.vertical
+            // Free, the strip stays where it was dropped and the tab keeps its side.
+            if !free { $0.edge = drop.edge }
         }
         panel.reposition(animated: true)
     }

@@ -57,8 +57,36 @@ edge or another screen; it snaps to whichever edge you release nearest.
 `PadContainerView.layout()` does this by hand — dynamic constraint swapping for two boxes is
 more code, not less.
 
-Height is a fraction of `visibleFrame` (default 0.48), vertically centred. Width, height,
-background, text size and appearance are all sliders in Settings; there are no drag grips.
+Height is a fraction of `visibleFrame` (default 0.48). Width, height, background, text size
+and appearance are all sliders in Settings; there are no drag grips.
+
+## Placement
+
+Two modes, both driven by the same two numbers in `SettingsData`:
+
+- **Pinned** (default) — flush to `edge`. `horizontalFraction` is ignored;
+  `verticalFraction` is the user's, so the strip sits wherever it was dragged up or down.
+- **Free** (`data.free`, the pin button in the bar, ⌘⇧F, or the context menu) — both
+  fractions are used and the strip floats anywhere on the screen. `edge` still says which
+  side of the card the tab sticks out of, and every corner is rounded, because there is no
+  longer a screen edge for the card to be continuous with.
+
+`verticalFraction` and `horizontalFraction` are the **centre** of the strip as a fraction of
+`visibleFrame`, vertical measured from the top. Fractions rather than points so a position
+survives a resolution change or a smaller display; `frame(on:)` clamps the result anyway,
+because a fraction that fit one screen can hang off another.
+
+`ScreenAnchor.fractions(of:on:)` is the exact inverse and is what a drag stores. It is fed
+`expandedEquivalent(of:on:)` first: while minimised the window is only the 13 pt tab, and
+the fractions have to describe where the whole strip would be, or restoring would put the
+card somewhere other than where the nub was.
+
+Toggling free is deliberately a no-op geometrically — the current position becomes the free
+position, and snapping back picks whichever edge the strip is nearer. The button should read
+as unlocking something, not as moving it.
+
+Dragging the tab moves both axes in both modes. Pinned, the drop snaps x back to the edge
+(`ScreenAnchor.drop`) and keeps the height it was let go at.
 
 **Background opacity is the card's ground colour, never `panel.alphaValue`.** Fading the
 window takes the text with it, which is the one thing the setting must not do. So
@@ -118,6 +146,9 @@ Shrinking the window on its own reads as *vanishing*, not sliding. The trick is 
   is transparent everywhere else.
 - Sliding the *window* off the screen edge would have been simpler and is wrong: the
   displays are adjacent, so the card would reappear on the neighbouring screen.
+- The rule the animation follows — the outer edge stays, the inner one travels — is also
+  what `frame(on:)` has to reproduce for a minimised *free* strip, or the nub would jump
+  sideways at the end of the swipe. The two must agree.
 
 `suppressReposition` stops the settings-changed observer from fighting the controller for
 the frame while this runs.

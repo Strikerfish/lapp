@@ -45,9 +45,50 @@ enum ScreenAnchor {
         let height = data.minimized
             ? Metrics.tabHeight
             : (area.height * min(max(data.heightFraction, 0.2), 1.0)).rounded()
-        let x = data.edge == .right ? area.maxX - width : area.minX
-        let y = (area.midY - height / 2).rounded()
-        return NSRect(x: x, y: y, width: width, height: height)
+
+        // Pinned, x comes from the edge and only y is the user's; free, both are.
+        let expandedWidth = cardWidth(on: screen) + Metrics.tabWidth
+        let expandedX = area.minX + area.width * data.horizontalFraction - expandedWidth / 2
+        let x: CGFloat
+        if data.free {
+            // Minimised, the window is only the tab. It stays where the card's outer edge
+            // was -- the same edge the minimise swipe pins while it animates -- so the
+            // strip doesn't hop sideways as it closes.
+            x = data.minimized && data.edge == .right
+                ? expandedX + expandedWidth - Metrics.tabWidth
+                : expandedX
+        } else {
+            x = data.edge == .right ? area.maxX - width : area.minX
+        }
+        let y = area.maxY - area.height * data.verticalFraction - height / 2
+
+        // Clamped rather than trusted: a fraction that was fine on one display can put
+        // the strip off the edge of a smaller one.
+        return NSRect(x: min(max(x, area.minX), area.maxX - width).rounded(),
+                      y: min(max(y, area.minY), area.maxY - height).rounded(),
+                      width: width, height: height)
+    }
+
+    /// A minimised window is only the tab, but the stored fractions describe the whole
+    /// strip. This is the rectangle the card would occupy if it were expanded where the
+    /// tab now is, so dragging the nub about leaves the card where you would expect it.
+    static func expandedEquivalent(of frame: NSRect, on screen: NSScreen) -> NSRect {
+        let data = Settings.shared.data
+        guard data.minimized else { return frame }
+        var result = frame
+        result.size.width = cardWidth(on: screen) + Metrics.tabWidth
+        result.origin.x = data.edge == .right ? frame.maxX - result.width : frame.minX
+        return result
+    }
+
+    /// The inverse of `frame(on:)` -- where a window that has just been dragged sits, as
+    /// the fractions that will put it back there.
+    static func fractions(of frame: NSRect, on screen: NSScreen) -> (horizontal: CGFloat, vertical: CGFloat) {
+        let area = screen.visibleFrame
+        guard area.width > 0, area.height > 0 else { return (0.5, 0.5) }
+        let horizontal = (frame.midX - area.minX) / area.width
+        let vertical = (area.maxY - frame.midY) / area.height
+        return (min(max(horizontal, 0), 1), min(max(vertical, 0), 1))
     }
 
     /// Where the strip would land if dropped at this point -- used while dragging the tab.

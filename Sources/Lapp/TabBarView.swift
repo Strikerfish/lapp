@@ -27,7 +27,7 @@ final class TabBarView: NSView, Themed {
     private var revealPending = false
 
     override init(frame frameRect: NSRect) {
-        plus = IconButton(symbol: "plus", tooltip: "New tab (⌘T)", action: #selector(newTab), target: nil)
+        plus = IconButton(symbol: "plus", tooltip: "New tab", action: #selector(newTab), target: nil)
         super.init(frame: frameRect)
         wantsLayer = true
         plus.target = self
@@ -125,6 +125,7 @@ final class TabBarView: NSView, Themed {
     func applyTheme(_ theme: Theme) {
         self.theme = theme
         layer?.backgroundColor = NSColor.clear.cgColor
+        plus.setSymbol("plus", tooltip: "New tab" + LappAction.newTab.shortcutSuffix)
         plus.applyTheme(theme)
         chips.forEach { $0.applyTheme(theme) }
     }
@@ -167,7 +168,6 @@ private final class TabChip: NSView, Themed {
         close.target = self
         close.action = #selector(closeTab)
         close.isHidden = true
-        close.toolTip = "Close tab (⌘W)"
         close.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(label)
@@ -193,6 +193,7 @@ private final class TabChip: NSView, Themed {
         label.textColor = isActive ? theme.text : theme.muted
         label.font = NSFont.systemFont(ofSize: 10.5, weight: isActive ? .medium : .regular)
         close.contentTintColor = theme.button
+        close.toolTip = "Close tab" + LappAction.closeTab.shortcutSuffix
         close.isHidden = !hovering
     }
 

@@ -39,6 +39,13 @@ final class IconButton: NSButton {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    func setSymbol(_ symbol: String, tooltip: String) {
+        let config = NSImage.SymbolConfiguration(pointSize: 11.5, weight: .medium)
+        image = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip)?
+            .withSymbolConfiguration(config)
+        toolTip = tooltip
+    }
+
     func applyTheme(_ theme: Theme) {
         self.theme = theme
         contentTintColor = theme.button
@@ -158,12 +165,15 @@ final class PadContainerView: NSView {
         }
 
         // Round only the corners that face into the screen; the outer side stays square so
-        // the strip reads as continuous with the screen edge.
+        // the strip reads as continuous with the screen edge. Off the edge there is no
+        // edge to be continuous with, so everything is rounded.
+        let allCorners: CACornerMask = [.layerMinXMinYCorner, .layerMinXMaxYCorner,
+                                        .layerMaxXMinYCorner, .layerMaxXMaxYCorner]
         let innerCorners: CACornerMask = onRight
             ? [.layerMinXMinYCorner, .layerMinXMaxYCorner]
             : [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
-        card.layer?.maskedCorners = innerCorners
-        tab.layer?.maskedCorners = innerCorners
+        card.layer?.maskedCorners = data.free ? allCorners : innerCorners
+        tab.layer?.maskedCorners = data.free ? allCorners : innerCorners
         tab.pointsOutward = onRight
         tab.needsDisplay = true
 
@@ -291,6 +301,8 @@ final class PadRootView: NSView {
     private let hairline = NSView()
     private let placeholder = NSTextField(labelWithString: "")
     private let status = NSTextField(labelWithString: "")
+    private lazy var pinButton = IconButton(symbol: "pin.fill", tooltip: "Free placement",
+                                            action: #selector(toggleFree), target: self)
     private var buttons: [IconButton] = []
     private var overlay: NSView?
     private var overlayOffset: NSLayoutConstraint?
@@ -345,7 +357,8 @@ final class PadRootView: NSView {
         let discard = IconButton(symbol: "xmark", tooltip: "Discard", action: #selector(discardNote), target: self)
         let history = IconButton(symbol: "list.bullet", tooltip: "History", action: #selector(showHistory), target: self)
         let settings = IconButton(symbol: "gearshape", tooltip: "Settings", action: #selector(showSettings), target: self)
-        buttons = [file, discard, history, settings]
+        buttons = [file, discard, history, settings, pinButton]
+        refreshPinButton()
 
         let stack = NSStackView(views: buttons)
         stack.orientation = .horizontal
@@ -428,6 +441,7 @@ final class PadRootView: NSView {
         tabBar.applyTheme(theme)
         placeholder.textColor = theme.muted
         status.textColor = theme.muted
+        refreshPinButton()
         buttons.forEach { $0.applyTheme(theme) }
 
         styler.theme = theme
@@ -479,6 +493,15 @@ final class PadRootView: NSView {
     @objc private func discardNote() { delegate?.padPerform(.discardNote) }
     @objc private func showHistory() { delegate?.padPerform(.history) }
     @objc private func showSettings() { delegate?.padPerform(.settings) }
+    @objc private func toggleFree() { delegate?.padPerform(.toggleFree) }
+
+    /// The pin shows where the strip is now; the tooltip says what clicking it does.
+    private func refreshPinButton() {
+        let free = Settings.shared.data.free
+        pinButton.setSymbol(free ? "pin.slash.fill" : "pin.fill",
+                            tooltip: (free ? "Snap back to the edge" : "Free placement")
+                                + LappAction.toggleFree.shortcutSuffix)
+    }
 
     // MARK: Status flash
 
@@ -565,10 +588,21 @@ final class PadRootView: NSView {
             menu.addItem(.separator())
         }
 
-        let flip = NSMenuItem(title: Settings.shared.data.edge == .right ? "Move to Left Edge" : "Move to Right Edge",
-                              action: #selector(flipEdge), keyEquivalent: "")
+        let data = Settings.shared.data
+        let flipTitle: String
+        if data.free {
+            flipTitle = data.edge == .right ? "Put the Tab on the Left" : "Put the Tab on the Right"
+        } else {
+            flipTitle = data.edge == .right ? "Move to Left Edge" : "Move to Right Edge"
+        }
+        let flip = NSMenuItem(title: flipTitle, action: #selector(flipEdge), keyEquivalent: "")
         flip.target = self
         menu.addItem(flip)
+
+        let free = NSMenuItem(title: "Free Placement", action: #selector(toggleFree), keyEquivalent: "")
+        free.target = self
+        free.state = data.free ? .on : .off
+        menu.addItem(free)
 
         menu.addItem(.separator())
         let obsidian = NSMenuItem(title: "Send to Obsidian", action: #selector(sendToObsidian), keyEquivalent: "")

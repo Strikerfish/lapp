@@ -15,6 +15,7 @@ enum LappAction: String, CaseIterable, Codable {
     case history
     case settings
     case sendToObsidian
+    case toggleFree
 
     var title: String {
         switch self {
@@ -28,11 +29,18 @@ enum LappAction: String, CaseIterable, Codable {
         case .history: return "History"
         case .settings: return "Settings"
         case .sendToObsidian: return "Send to Obsidian"
+        case .toggleFree: return "Free placement"
         }
     }
 
     /// Only `focusPad` is registered system-wide; the rest fire while the pad has focus.
     var isGlobal: Bool { self == .focusPad }
+
+    /// " (⌘T)", for tooltips. Read from the binding rather than written out, so a tooltip
+    /// can't go stale the moment something is rebound.
+    var shortcutSuffix: String {
+        Settings.shared.binding(for: self).map { " (\($0.display))" } ?? ""
+    }
 
     var defaultBinding: KeyBinding {
         switch self {
@@ -46,6 +54,7 @@ enum LappAction: String, CaseIterable, Codable {
         case .history:         return KeyBinding(keyCode: 37, modifiers: [.command])           // ⌘L
         case .settings:        return KeyBinding(keyCode: 43, modifiers: [.command])           // ⌘,
         case .sendToObsidian:  return KeyBinding(keyCode: 31, modifiers: [.command, .shift])   // ⌘⇧O
+        case .toggleFree:      return KeyBinding(keyCode: 3, modifiers: [.command, .shift])    // ⌘⇧F
         }
     }
 }
@@ -124,6 +133,14 @@ enum ScreenEdge: String, Codable {
 struct SettingsData: Codable {
     var displayID: String?          // CGDisplay UUID string, nil = auto
     var edge: ScreenEdge = .right
+    /// Off the edge entirely: the strip floats wherever it was put, on any part of the
+    /// screen. `edge` still says which side of the card the tab sticks out of.
+    var free: Bool = false
+    /// Where the strip sits on its screen, as a fraction of the visible frame. Both are
+    /// the *centre* of the window: vertical measured from the top, so 0 is the top edge
+    /// and 1 the bottom. Horizontal is only read when `free`.
+    var horizontalFraction: CGFloat = 0.5
+    var verticalFraction: CGFloat = 0.5
     var width: CGFloat = 300
     var heightFraction: CGFloat = 0.48
     var minimized: Bool = false
@@ -146,6 +163,9 @@ struct SettingsData: Codable {
         let fallback = SettingsData()
         displayID      = try c.decodeIfPresent(String.self, forKey: .displayID)
         edge           = try c.decodeIfPresent(ScreenEdge.self, forKey: .edge) ?? fallback.edge
+        free           = try c.decodeIfPresent(Bool.self, forKey: .free) ?? fallback.free
+        horizontalFraction = try c.decodeIfPresent(CGFloat.self, forKey: .horizontalFraction) ?? fallback.horizontalFraction
+        verticalFraction   = try c.decodeIfPresent(CGFloat.self, forKey: .verticalFraction) ?? fallback.verticalFraction
         width          = try c.decodeIfPresent(CGFloat.self, forKey: .width) ?? fallback.width
         heightFraction = try c.decodeIfPresent(CGFloat.self, forKey: .heightFraction) ?? fallback.heightFraction
         minimized      = try c.decodeIfPresent(Bool.self, forKey: .minimized) ?? fallback.minimized

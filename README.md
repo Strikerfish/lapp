@@ -9,8 +9,11 @@ nothing in it polls.
 ## What it does
 
 - **Always there.** A narrow strip pinned flush to the left or right edge of a chosen display,
-  floating above everything and visible on every Space. Drag its tab to move it to the other
-  edge or to another screen.
+  floating above everything and visible on every Space. Drag its tab to move it up and down,
+  to the other edge, or to another screen.
+- **Or anywhere at all.** One button takes it off the edge and lets it float wherever you
+  put it — drag the tab up, down or into the middle of the screen. Press it again and the
+  strip snaps back to whichever edge it is nearest.
 - **Never steals focus.** It is a non-activating panel: it takes your keystrokes without making
   Lapp the frontmost app, so the thing you were working in stays where it was. Escape hands
   focus straight back.
@@ -80,6 +83,7 @@ Everything lives in `~/Lapp/` as plain files. If the app ever dies, your notes a
 | ⌘L | history |
 | ⌘, | settings |
 | ⌘⇧O | send to Obsidian |
+| ⌘⇧F | free placement on / off |
 | ⎋ | hand focus back to the app you came from |
 
 All rebindable in Settings except ⌘1 … ⌘9. Everything but ⌥Space only fires while the pad
